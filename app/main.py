@@ -2,11 +2,14 @@
 
 import asyncio
 import logging
+import os
+import tempfile
 import time
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse, Response
 
 from app.browser_manager import browser_manager
 from app.config import settings
@@ -45,7 +48,7 @@ async def lifespan(app: FastAPI):
             logger.info("Gemini session verified - ready to accept requests")
         except SessionExpiredError:
             logger.error(
-                "Gemini session expired! Please run 'python login_helper.py' to authenticate."
+                "Gemini session expired! Please run 'python login_helper.py' or 'node index.js --login' to authenticate."
             )
         except Exception as e:
             logger.warning(f"Could not verify Gemini session: {e}")
@@ -66,18 +69,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Gemini Web API Wrapper",
     description="Local-only API wrapper for Gemini web UI using Playwright automation",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
 
 @app.get("/")
 async def root():
-    """Root endpoint - health check."""
+    """Root endpoint - health check and usage."""
     return {
         "service": "Gemini Web API Wrapper",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "running" if browser_manager.is_running else "browser_not_ready",
+        "usage": {
+            "POST /": "Accepts multipart/form-data (prompt and/or image file) and returns binary image",
+            "POST /ask": "JSON endpoint for text/multimodal Q&A"
+        },
         "docs": "/docs",
     }
 
@@ -94,6 +101,56 @@ async def health_check():
     }
 
 
+@app.post("/")
+async def minimal_root_endpoint(
+    prompt: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None)
+):
+    """
+    Minimal universal endpoint:
+    Accepts prompt and/or image file, returns binary image or JSON text.
+    """
+    if not prompt and not image:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide at least 'prompt' or an uploaded 'image' file."
+        )
+
+    temp_path = None
+    files = None
+
+    if image:
+        suffix = os.path.splitext(image.filename)[1] if image.filename else ".png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await image.read())
+            temp_path = tmp.name
+        files = [temp_path]
+
+    await browser_manager.acquire_lock()
+    try:
+        page = await browser_manager.get_page()
+        response_text, model_used, fallback, image_bytes = await ask_gemini(
+            page=page,
+            prompt=prompt or "",
+            model=settings.default_model,
+            fallback_to_flash=settings.fallback_to_flash,
+            files=files
+        )
+
+        if image_bytes:
+            return Response(content=image_bytes, media_type="image/png")
+        else:
+            return JSONResponse(content={"success": True, "text": response_text})
+
+    finally:
+        browser_manager.release_lock()
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
 @app.post(
     "/ask",
     response_model=AskResponse,
@@ -107,20 +164,10 @@ async def health_check():
 )
 async def ask_endpoint(request: AskRequest):
     """
-    Send a prompt to Gemini and get a response.
-
-    Args:
-        request: AskRequest with prompt, model, and options
-
-    Returns:
-        AskResponse with Gemini's response
-
-    Raises:
-        HTTPException: For various error conditions
+    Send a prompt or multimodal input to Gemini.
     """
     start_time = time.time()
 
-    # Validate model
     valid_models = ["gemini-2.5-pro", "gemini-2.5-flash"]
     if request.model not in valid_models:
         raise HTTPException(
@@ -128,7 +175,6 @@ async def ask_endpoint(request: AskRequest):
             detail=f"Invalid model. Must be one of: {valid_models}",
         )
 
-    # Check if browser is running
     if not browser_manager.is_running:
         logger.error("Browser not running - attempting to restart")
         try:
@@ -139,14 +185,12 @@ async def ask_endpoint(request: AskRequest):
                 detail=f"Browser service unavailable: {str(e)}",
             )
 
-    # Acquire lock for single-threaded execution
     await browser_manager.acquire_lock()
 
     try:
         page = await browser_manager.get_page()
 
-        # Call the automation
-        response_text, model_used, fallback_triggered = await ask_gemini(
+        response_text, model_used, fallback_triggered, image_bytes = await ask_gemini(
             page=page,
             prompt=request.prompt,
             model=request.model,
@@ -154,16 +198,14 @@ async def ask_endpoint(request: AskRequest):
             files=request.files,
         )
 
-        # Calculate latency
         latency_ms = int((time.time() - start_time) * 1000)
 
-        # Build response
         return AskResponse(
             model_requested=request.model,
             model_used=model_used,
             fallback_triggered=fallback_triggered,
             response_text=response_text,
-            raw_response_html=None,  # Optionally include raw HTML
+            raw_response_html=None,
             meta=ResponseMeta(latency_ms=latency_ms),
         )
 
@@ -171,45 +213,32 @@ async def ask_endpoint(request: AskRequest):
         logger.error(f"Session expired: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "gemini_session_expired",
-                "details": str(e),
-            },
+            detail={"error": "gemini_session_expired", "details": str(e)},
         )
 
     except QuotaExceededError as e:
-        logger.warning(f"Quota exceeded: {e}")
+        logger.error(f"Quota exceeded: {e}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "error": "pro_quota_exceeded",
-                "details": str(e),
-            },
+            detail={"error": "pro_quota_exceeded", "details": str(e)},
         )
 
     except UnexpectedUIStateError as e:
         logger.error(f"Unexpected UI state: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": "unexpected_ui_state",
-                "details": str(e),
-            },
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "unexpected_ui_state", "details": str(e)},
         )
 
     except AutomationTimeoutError as e:
         logger.error(f"Automation timeout: {e}")
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail={
-                "error": "automation_timeout",
-                "details": str(e),
-            },
+            detail={"error": "automation_timeout", "details": str(e)},
         )
 
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
-        # Attempt to restart browser on unexpected errors
         try:
             await browser_manager.restart()
         except Exception:
@@ -217,14 +246,10 @@ async def ask_endpoint(request: AskRequest):
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error": "internal_error",
-                "details": str(e),
-            },
+            detail={"error": "internal_error", "details": str(e)},
         )
 
     finally:
-        # Always release lock
         browser_manager.release_lock()
 
 

@@ -1,8 +1,11 @@
 """Core Gemini UI automation logic using Playwright."""
 
 import asyncio
+import base64
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Optional, Tuple, List
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
@@ -36,7 +39,7 @@ class AutomationTimeoutError(GeminiAutomationError):
     pass
 
 
-# DOM Selectors based on the spec
+# DOM Selectors based on Gemini Web UI
 SELECTORS = {
     # Model selection
     "model_pill": '[data-test-id="bard-mode-menu-button"]',
@@ -46,20 +49,20 @@ SELECTORS = {
     "model_flash": '[data-test-id="bard-mode-option-2.5flash"]',
 
     # Text input
-    "text_editor": 'div.ql-editor.textarea.new-input-ui[aria-label="Enter a prompt here"]',
+    "text_editor": 'div.ql-editor.textarea.new-input-ui[aria-label="Enter a prompt here"], div.ql-editor[contenteditable="true"], textarea[aria-label*="prompt" i], div[contenteditable="true"]',
 
     # File upload
-    "upload_button": 'button[aria-label="Open upload file menu"]',
+    "upload_button": 'button[aria-label*="Upload" i], button[aria-label*="Importer" i], button[aria-label="Open upload file menu"], button[mattooltip*="Upload" i]',
     "upload_card": '[data-test-id="upload-file-card-container"]',
-    "upload_files_button": '[data-test-id="local-images-files-uploader-button"]',
-    "hidden_file_selector": '.hidden-local-file-image-selector-button[xapfileselectortrigger]',
+    "upload_files_button": '[data-test-id="local-images-files-uploader-button"], button[aria-label*="Upload" i]',
+    "hidden_file_selector": '.hidden-local-file-image-selector-button[xapfileselectortrigger], input[type="file"]',
 
     # Send message
-    "send_button": 'button[aria-label="Send message"]',
+    "send_button": 'button[aria-label*="Send" i], button[aria-label*="Envoyer" i], button[data-test-id="send-button"]',
 
     # Response
     "message_container": 'message-content',
-    "response_content": 'model-response-text',
+    "response_content": 'model-response-text, .model-response, message-content',
 }
 
 
@@ -75,15 +78,7 @@ QUOTA_ERROR_PATTERNS = [
 
 
 def is_quota_error(text: str) -> bool:
-    """
-    Check if response text indicates Pro quota exceeded.
-
-    Args:
-        text: Response text to check
-
-    Returns:
-        True if quota error detected
-    """
+    """Check if response text indicates Pro quota exceeded."""
     text_lower = text.lower()
     for pattern in QUOTA_ERROR_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
@@ -93,39 +88,27 @@ def is_quota_error(text: str) -> bool:
 
 
 async def ensure_gemini_ready(page: Page) -> None:
-    """
-    Ensure we're on Gemini chat screen and logged in.
-
-    Args:
-        page: Playwright page instance
-
-    Raises:
-        SessionExpiredError: If not logged in
-        UnexpectedUIStateError: If UI is not ready
-    """
+    """Ensure we're on Gemini chat screen and logged in."""
     logger.info("Ensuring Gemini is ready...")
 
-    # Navigate to Gemini
     try:
-        await page.goto(settings.gemini_url, wait_until="networkidle")
+        await page.goto(settings.gemini_url, wait_until="domcontentloaded", timeout=settings.page_load_timeout)
     except Exception as e:
         logger.error(f"Failed to navigate to Gemini: {e}")
         raise UnexpectedUIStateError(f"Failed to load Gemini: {e}")
 
-    # Wait a moment for page to settle
-    await asyncio.sleep(1)
+    await asyncio.sleep(1.5)
 
-    # Check if we're on a login page
     current_url = page.url
-    if "accounts.google.com" in current_url or "login" in current_url.lower():
+    if "accounts.google.com" in current_url or "login" in current_url.lower() or "signin" in current_url.lower():
         logger.error("Detected login page - session expired")
         raise SessionExpiredError(
-            "Detected Google login page at gemini.google.com; please rerun login helper."
+            "Detected Google login page at gemini.google.com; please run 'python login_helper.py' or 'node index.js --login' to authenticate."
         )
 
-    # Check for text editor (main chat interface)
+    # Check for prompt input area
     try:
-        await page.wait_for_selector(SELECTORS["text_editor"], timeout=5000, state="visible")
+        await page.wait_for_selector(SELECTORS["text_editor"], timeout=8000, state="visible")
         logger.info("Gemini chat interface ready")
     except PlaywrightTimeout:
         logger.error("Text editor not found - unexpected UI state")
@@ -135,133 +118,132 @@ async def ensure_gemini_ready(page: Page) -> None:
 
 
 async def select_model(page: Page, model: str) -> None:
-    """
-    Select the specified model (Pro or Flash).
-
-    Args:
-        page: Playwright page instance
-        model: "gemini-2.5-pro" or "gemini-2.5-flash"
-
-    Raises:
-        UnexpectedUIStateError: If model selection fails
-    """
+    """Select the specified model (Pro or Flash) if the menu exists."""
     logger.info(f"Selecting model: {model}")
 
-    # Map model name to selector
-    model_selector = SELECTORS["model_pro"] if "pro" in model.lower() else SELECTORS["model_flash"]
+    model_selector = (
+        SELECTORS["model_pro"]
+        if "pro" in model.lower()
+        else SELECTORS["model_flash"]
+    )
 
     try:
-        # Click the model pill to open menu
-        await page.locator(SELECTORS["model_pill"]).click()
-        logger.debug("Clicked model pill")
+        pill = page.locator(SELECTORS["model_pill"]).first
+        if not await pill.is_visible(timeout=2000):
+            logger.info("Model pill selector not found, skipping explicit model switch")
+            return
 
-        # Wait for menu to appear (try both desktop and mobile)
-        menu_visible = False
-        for menu_selector in [SELECTORS["desktop_menu"], SELECTORS["mobile_menu"]]:
-            try:
-                await page.wait_for_selector(menu_selector, timeout=2000, state="visible")
-                logger.debug(f"Model menu appeared: {menu_selector}")
-                menu_visible = True
-                break
-            except PlaywrightTimeout:
-                continue
+        await pill.click()
+        await asyncio.sleep(0.5)
 
-        if not menu_visible:
-            raise UnexpectedUIStateError("Model selection menu did not appear")
-
-        # Click the target model option
-        await page.locator(model_selector).click()
-        logger.info(f"Selected model: {model}")
-
-        # Wait for menu to close
-        await asyncio.sleep(1)
-
-    except PlaywrightTimeout as e:
-        logger.error(f"Timeout during model selection: {e}")
-        raise UnexpectedUIStateError(f"Failed to select model: {e}")
+        target = page.locator(model_selector).first
+        if await target.is_visible(timeout=2000):
+            await target.click()
+            logger.info(f"Selected model: {model}")
+        await asyncio.sleep(0.5)
     except Exception as e:
-        logger.error(f"Error during model selection: {e}")
-        raise UnexpectedUIStateError(f"Model selection failed: {e}")
+        logger.debug(f"Model selection skipped or handled: {e}")
 
 
 async def upload_files(page: Page, file_paths: List[str]) -> None:
     """
-    Upload files to Gemini via the upload menu.
-
-    Args:
-        page: Playwright page instance
-        file_paths: List of local file paths to upload
-
-    Raises:
-        UnexpectedUIStateError: If file upload fails
+    Upload files to Gemini via file chooser or synthetic paste fallback.
+    Supports Case 2 (Image seule) and Case 3 (Image + Prompt).
     """
     logger.info(f"Uploading {len(file_paths)} file(s)...")
 
-    try:
-        # Click the upload button to open menu
-        await page.locator(SELECTORS["upload_button"]).click()
-        logger.debug("Clicked upload button")
+    for file_path in file_paths:
+        path_obj = Path(file_path).resolve()
+        if not path_obj.exists():
+            raise FileNotFoundError(f"File not found: {path_obj}")
 
-        # Wait for upload card to appear
-        await page.wait_for_selector(SELECTORS["upload_card"], timeout=3000, state="visible")
-        logger.debug("Upload menu appeared")
+        uploaded = False
 
-        # Set up file chooser event handler
-        async with page.expect_file_chooser() as fc_info:
-            # Click "Upload files" button
-            await page.locator(SELECTORS["upload_files_button"]).click()
-            logger.debug("Clicked 'Upload files' button")
+        # Attempt 1: Hidden file input if directly present
+        file_inputs = page.locator('input[type="file"]')
+        if await file_inputs.count() > 0:
+            try:
+                await file_inputs.first.set_input_files(str(path_obj))
+                uploaded = True
+                logger.info(f"Uploaded via direct file input: {path_obj.name}")
+            except Exception as e:
+                logger.debug(f"Direct file input upload failed: {e}")
 
-        file_chooser = await fc_info.value
-        await file_chooser.set_files(file_paths)
-        logger.info(f"Files selected: {file_paths}")
+        # Attempt 2: Click upload button to reveal file chooser
+        if not uploaded:
+            try:
+                upload_btn = page.locator(SELECTORS["upload_button"]).first
+                if await upload_btn.is_visible(timeout=3000):
+                    async with page.expect_file_chooser(timeout=4000) as fc_info:
+                        await upload_btn.click()
+                    file_chooser = await fc_info.value
+                    await file_chooser.set_files(str(path_obj))
+                    uploaded = True
+                    logger.info(f"Uploaded via file chooser: {path_obj.name}")
+            except Exception as e:
+                logger.debug(f"File chooser upload failed: {e}")
 
-        # Wait for files to upload (look for upload indicators to disappear)
-        await asyncio.sleep(2)
+        # Attempt 3: Clipboard paste injection fallback
+        if not uploaded:
+            logger.info("Injecting image file via paste event...")
+            raw_bytes = path_obj.read_bytes()
+            b64_data = base64.b64encode(raw_bytes).decode("utf-8")
+            ext = path_obj.suffix.lower()
+            mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
 
-    except PlaywrightTimeout as e:
-        logger.error(f"Timeout during file upload: {e}")
-        raise UnexpectedUIStateError(f"File upload failed: {e}")
-    except Exception as e:
-        logger.error(f"Error during file upload: {e}")
-        raise UnexpectedUIStateError(f"File upload error: {e}")
+            paste_js = """
+            async ({ b64, mime, filename }) => {
+                const editor = document.querySelector('div.ql-editor, textarea, [contenteditable="true"]');
+                if (!editor) return;
+                editor.focus();
+                const binary = atob(b64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                const blob = new Blob([bytes], { type: mime });
+                const file = new File([blob], filename, { type: mime });
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                const event = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+                editor.dispatchEvent(event);
+            }
+            """
+            await page.evaluate(paste_js, {"b64": b64_data, "mime": mime, "filename": path_obj.name})
+            uploaded = True
+
+        # Wait for preview indicator
+        await asyncio.sleep(2.5)
 
 
-async def send_prompt(page: Page, prompt: str) -> None:
+async def send_prompt(page: Page, prompt: Optional[str] = None) -> None:
     """
     Type prompt and send message.
-
-    Args:
-        page: Playwright page instance
-        prompt: The prompt text to send
-
-    Raises:
-        UnexpectedUIStateError: If sending fails
+    If prompt is empty or None (Case 2: Image only), sends directly without typing.
     """
-    logger.info(f"Sending prompt (length: {len(prompt)})")
+    has_text = prompt is not None and len(prompt.strip()) > 0
 
     try:
-        # Locate the text editor
-        editor = page.locator(SELECTORS["text_editor"])
+        editor = page.locator(SELECTORS["text_editor"]).first
 
-        # Click to focus
-        await editor.click()
-        logger.debug("Focused text editor")
-
-        # Clear any existing content
-        await page.keyboard.press("Control+A")
-        await page.keyboard.press("Backspace")
-
-        # Type the prompt
-        await editor.fill(prompt)
-        logger.debug("Prompt typed")
-
-        # Wait a moment for UI to register the text
-        await asyncio.sleep(0.5)
+        if has_text:
+            logger.info(f"Typing prompt (length: {len(prompt)})")
+            await editor.click()
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Backspace")
+            await editor.fill(prompt)
+            await asyncio.sleep(0.5)
+        else:
+            logger.info("No prompt text provided (Image-only mode).")
 
         # Click send button
-        await page.locator(SELECTORS["send_button"]).click()
-        logger.info("Prompt sent")
+        send_btn = page.locator(SELECTORS["send_button"]).first
+        if await send_btn.is_visible(timeout=3000) and await send_btn.is_enabled():
+            await send_btn.click()
+            logger.info("Send button clicked")
+        else:
+            # Fallback Enter key
+            await editor.focus()
+            await page.keyboard.press("Enter")
+            logger.info("Sent via Enter key")
 
     except PlaywrightTimeout as e:
         logger.error(f"Timeout while sending prompt: {e}")
@@ -271,85 +253,106 @@ async def send_prompt(page: Page, prompt: str) -> None:
         raise UnexpectedUIStateError(f"Prompt sending error: {e}")
 
 
-async def wait_for_response(page: Page, timeout_ms: int = None) -> Tuple[str, str]:
-    """
-    Wait for and extract Gemini's response.
+async def extract_generated_image(page: Page) -> Optional[bytes]:
+    """Search response area for generated images and return raw bytes."""
+    candidate_selectors = [
+        "model-response-text img",
+        "message-content img",
+        ".model-response img",
+        "img.image-node"
+    ]
 
-    Args:
-        page: Playwright page instance
-        timeout_ms: Timeout in milliseconds (uses config default if not specified)
+    for sel in candidate_selectors:
+        images = await page.locator(sel).all()
+        for img in images:
+            try:
+                if not await img.is_visible():
+                    continue
+                box = await img.bounding_box()
+                if box and box["width"] > 150 and box["height"] > 150:
+                    test_id = await img.get_attribute("data-test-id") or ""
+                    aria_label = await img.get_attribute("aria-label") or ""
+                    if test_id == "image-preview" or "preview" in aria_label.lower():
+                        continue
 
-    Returns:
-        Tuple of (response_text, raw_html)
+                    # Attempt to download via src
+                    src = await img.get_attribute("src")
+                    if src and src.startswith("http"):
+                        try:
+                            resp = await page.request.get(src)
+                            return await resp.body()
+                        except Exception:
+                            pass
+                    elif src and src.startswith("data:image"):
+                        data_part = src.split(",", 1)[1]
+                        return base64.b64decode(data_part)
 
-    Raises:
-        AutomationTimeoutError: If response takes too long
-        UnexpectedUIStateError: If response cannot be extracted
-    """
+                    # High-fidelity fallback screenshot
+                    return await img.screenshot()
+            except Exception:
+                continue
+
+    return None
+
+
+async def wait_for_response(page: Page, timeout_ms: int = None) -> Tuple[str, str, Optional[bytes]]:
+    """Wait for response, stream stabilization, and any generated image."""
     timeout_ms = timeout_ms or settings.response_timeout
     logger.info(f"Waiting for response (timeout: {timeout_ms}ms)...")
 
+    await asyncio.sleep(3)
+    response_selector = SELECTORS["response_content"]
+
     try:
-        # Wait for a response to appear
-        # Strategy: Wait for new message-content elements to appear
-        # We'll look for model-response-text which contains the actual response
-
-        # Wait a moment for the send to register
-        await asyncio.sleep(2)
-
-        # Wait for response content to appear and be complete
-        # The response will be in a model-response-text element
-        response_selector = SELECTORS["response_content"]
-
-        # Wait for response element to be visible
         await page.wait_for_selector(response_selector, timeout=timeout_ms, state="visible")
-        logger.debug("Response element appeared")
 
-        # Wait for streaming to complete (check if still updating)
-        # We'll wait a bit and check if content is still changing
         prev_text = ""
         stable_count = 0
-        max_wait_iterations = timeout_ms // 1000  # Check every second
+        max_iterations = timeout_ms // 1500
+        image_bytes = None
 
-        for i in range(max_wait_iterations):
-            # Get all response elements (take the last one, which is the latest)
+        for _ in range(max_iterations):
+            # Check for generated image
+            image_bytes = await extract_generated_image(page)
+            if image_bytes:
+                logger.info("Detected generated image in Gemini response!")
+                break
+
             response_elements = page.locator(response_selector)
             count = await response_elements.count()
-
             if count == 0:
-                await asyncio.sleep(1)
+                await asyncio.sleep(1.5)
                 continue
 
-            # Get the last response
             last_response = response_elements.nth(count - 1)
             current_text = await last_response.inner_text()
 
-            # Check if text has stabilized
             if current_text == prev_text and len(current_text) > 0:
                 stable_count += 1
-                if stable_count >= 2:  # Stable for 2 seconds
-                    logger.info("Response stable and complete")
+                if stable_count >= 2:
+                    logger.info("Response text stabilized")
                     break
             else:
                 stable_count = 0
 
             prev_text = current_text
-            await asyncio.sleep(1)
+            await asyncio.sleep(1.5)
 
-        # Extract final response
+        # Final extraction
         response_elements = page.locator(response_selector)
         count = await response_elements.count()
+        response_text = ""
+        raw_html = ""
 
-        if count == 0:
-            raise UnexpectedUIStateError("No response received from Gemini")
+        if count > 0:
+            last_response = response_elements.nth(count - 1)
+            response_text = await last_response.inner_text()
+            raw_html = await last_response.inner_html()
 
-        last_response = response_elements.nth(count - 1)
-        response_text = await last_response.inner_text()
-        raw_html = await last_response.inner_html()
+        if not image_bytes:
+            image_bytes = await extract_generated_image(page)
 
-        logger.info(f"Response received (length: {len(response_text)})")
-
-        return response_text, raw_html
+        return response_text, raw_html, image_bytes
 
     except PlaywrightTimeout:
         logger.error("Timeout waiting for response")
@@ -361,61 +364,40 @@ async def wait_for_response(page: Page, timeout_ms: int = None) -> Tuple[str, st
 
 async def ask_gemini(
     page: Page,
-    prompt: str,
+    prompt: Optional[str] = None,
     model: str = "gemini-2.5-pro",
     fallback_to_flash: bool = True,
-    files: Optional[List[str]] = None
-) -> Tuple[str, str, bool]:
+    files: Optional[List[str]] = None,
+    output_image_path: Optional[str] = None
+) -> Tuple[str, str, bool, Optional[bytes]]:
     """
-    High-level function to ask Gemini a question.
-
-    Args:
-        page: Playwright page instance
-        prompt: The prompt to send
-        model: Model to use ("gemini-2.5-pro" or "gemini-2.5-flash")
-        fallback_to_flash: Whether to fallback to Flash if Pro quota exceeded
-        files: Optional list of file paths to upload
-
-    Returns:
-        Tuple of (response_text, model_used, fallback_triggered)
-
-    Raises:
-        Various automation errors
+    High-level universal function handling all 3 cases:
+      - Case 1: Prompt alone (Text -> Image or Text)
+      - Case 2: Image alone (Image upload -> Response/Image)
+      - Case 3: Image + Prompt (Image upload + Instruction -> Modified Image)
     """
-    # Ensure Gemini is ready
     await ensure_gemini_ready(page)
-
-    # Select model
     await select_model(page, model)
 
-    # Upload files if provided
     if files:
         await upload_files(page, files)
 
-    # Send prompt
     await send_prompt(page, prompt)
 
-    # Wait for response
-    response_text, raw_html = await wait_for_response(page)
+    response_text, raw_html, image_bytes = await wait_for_response(page)
 
-    # Check for quota error
-    if is_quota_error(response_text):
-        logger.warning("Pro quota exceeded detected")
+    # Check for quota
+    if is_quota_error(response_text) and model == "gemini-2.5-pro" and fallback_to_flash:
+        logger.info("Quota exceeded on Pro, retrying with Flash...")
+        await select_model(page, "gemini-2.5-flash")
+        await send_prompt(page, prompt)
+        response_text, raw_html, image_bytes = await wait_for_response(page)
+        return response_text, "gemini-2.5-flash", True, image_bytes
 
-        if model == "gemini-2.5-pro" and fallback_to_flash:
-            logger.info("Attempting fallback to Flash...")
+    if image_bytes and output_image_path:
+        out_p = Path(output_image_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_bytes(image_bytes)
+        logger.info(f"Saved generated image to: {out_p}")
 
-            # Switch to Flash
-            await select_model(page, "gemini-2.5-flash")
-
-            # Re-send the prompt (without files to simplify)
-            await send_prompt(page, prompt)
-
-            # Get new response
-            response_text, raw_html = await wait_for_response(page)
-
-            return response_text, "gemini-2.5-flash", True
-        else:
-            raise QuotaExceededError("Pro quota exceeded and fallback disabled")
-
-    return response_text, model, False
+    return response_text, model, False, image_bytes

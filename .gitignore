@@ -27,6 +27,10 @@ env/
 
 # Playwright browser profile (contains session data)
 storage/
+user_data/
+
+# Node.js
+node_modules/
 
 # Environment variables
 .env

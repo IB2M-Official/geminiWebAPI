@@ -1,0 +1,29 @@
+{
+  "name": "gemini-web-automation",
+  "version": "1.1.0",
+  "description": "Lightweight Gemini Web automation wrapper with Playwright supporting text, img2img, and image modification via CLI and Express API",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "cli": "node index.js",
+    "login": "node login.js",
+    "server": "node index.js --server"
+  },
+  "keywords": [
+    "gemini",
+    "playwright",
+    "automation",
+    "imagen",
+    "img2img",
+    "image-generation",
+    "ai"
+  ],
+  "author": "czarflix (original) / community contributors",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "playwright": "^1.49.1"
+  }
+}
