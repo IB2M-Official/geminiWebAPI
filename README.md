@@ -1,182 +1,182 @@
 # Gemini Web-UI Automation Wrapper (Extended Edition)
 
-> **Base Repository & Credits**: Ce projet est basé sur le dépôt open-source [`czarflix/GeminiCustomAPI`](https://github.com/czarflix/GeminiCustomAPI) (MIT License, Copyright (c) 2025 Gemini Custom API Contributors).  
-> Tous les crédits de l'architecture Playwright originale reviennent à l'auteur original.
+> **Base Repository & Credits**: This project is built upon the open-source repository [`czarflix/GeminiCustomAPI`](https://github.com/czarflix/GeminiCustomAPI) (MIT License, Copyright (c) 2025 Gemini Custom API Contributors).  
+> All credits for the original Playwright browser lifecycle architecture go to the original author.
 
-Cette extension apporte une surcouche **ultra-légère, universelle et rapide** permettant d'exploiter Gemini Web en génération d'image, vision, et édition d'image multimodal (Image-to-Image / Prompt-to-Image) sans réécriture lourde.
+This extension provides an **ultra-lightweight, universal, and fast** automation wrapper for Google Gemini Web, supporting image generation, vision analysis, and multimodal image editing (Image-to-Image / Prompt-to-Image) without requiring heavy dependencies.
 
 ---
 
-## 🚀 Nouvelles fonctionnalités ajoutées
+## 🚀 Key Features Added
 
-### 1. Prise en charge universelle (3 modes fluides)
-* **Cas 1 (Prompt seul) :** Saisie du texte dans le champ Gemini -> Génération de l'image (ou réponse texte) enregistrée directement sur disque.
-* **Cas 2 (Image seule) :** Upload de l'image sur l'interface Gemini -> Envoi sans texte -> Récupération de l'image / analyse.
-* **Cas 3 (Image + Prompt) :** Upload de l'image source ET saisie du prompt d'instruction (ex: *"transforme cette photo en style anime manga"*) -> Envoi -> Récupération automatique de l'image modifiée.
+### 1. Universal Multimodal Support (3 Seamless Modes)
+* **Case 1 (Prompt only):** Input prompt into Gemini -> Automatic generation of the image (or text response) saved directly to disk.
+* **Case 2 (Image only):** Upload image to Gemini UI -> Send without text prompt -> Retrieve image response or analysis.
+* **Case 3 (Image + Prompt):** Upload input image **AND** enter instruction prompt (e.g. *"transform this photo into anime manga style"*) -> Send -> Automatically extract and save the edited image.
 
-### 2. Interfaces d'entrée minimales (Node.js & Python au choix)
-* **CLI Ultra-rapide Node.js :**
+### 2. Minimalist Interfaces (Node.js & Python)
+* **Ultra-Fast Node.js CLI:**
   ```bash
-  node index.js --prompt "un chat mignon" --image "./input.png" --out "./output.png"
+  node index.js --prompt "a cute cat in 3D render style" --image "./input.png" --out "./output.png"
   ```
-* **Serveur Web minimaliste Express :**
-  Un seul fichier et endpoint `POST /` acceptant un prompt et/ou un fichier image et renvoyant directement le flux binaire de l'image générée :
+* **Minimalist Express Web Server:**
+  A single file offering a `POST /` endpoint accepting prompt and/or image file, directly returning the binary image stream:
   ```bash
   node index.js --server --port 3000
   ```
-* **CLI & API Python (Parité complète) :**
+* **Python CLI & API (Full Parity):**
   ```bash
-  python cli.py --prompt "un chat mignon" --image "./input.png" --out "./output.png"
+  python cli.py --prompt "a cute cat" --image "./input.png" --out "./output.png"
   ```
-  Le serveur FastAPI d'origine (`python main.py`) propose également le nouvel endpoint `POST /` renvoyant le résultat binaire.
+  The original FastAPI server (`python main.py`) also includes the `POST /` binary image endpoint.
 
-### 3. Session persistante unique (`user_data` / `storage`)
-Le profil Chromium est conservé localement. Vous ne vous authentifiez qu'une seule fois avec votre compte Google, et la session est réutilisée automatiquement par toutes les requêtes CLI et API sans reconnexion.
+### 3. Persistent Chromium Session (`user_data` / `storage`)
+The browser profile is stored locally. You only log in to your Google account **once**. All subsequent CLI commands and API calls reuse this authenticated session without needing to log in again.
 
 ---
 
-## 📦 Installation rapide
+## 📦 Installation
 
-### Option A : Environnement Node.js (Recommandé pour `node index.js`)
+### Option A: Node.js Environment (Recommended for `node index.js`)
 
-1. Installer les dépendances :
+1. Install dependencies:
 ```bash
 npm install
 ```
-2. Installer Chromium pour Playwright (si pas déjà fait) :
+2. Install Chromium for Playwright (if not already installed):
 ```bash
 npx playwright install chromium
 ```
 
-### Option B : Environnement Python
+### Option B: Python Environment
 
-1. Installer les dépendances :
+1. Install dependencies:
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 ```
-2. Copier le fichier de configuration :
+2. Copy configuration file:
 ```bash
 cp .env.example .env
 ```
 
 ---
 
-## 🔑 Authentification initiale (À faire 1 seule fois)
+## 🔑 Initial Setup (One-Time Login)
 
-Lancez l'assistant de connexion pour ouvrir un navigateur visible :
+Launch the login helper to open a visible browser window:
 
-* **En Node.js :**
+* **Using Node.js:**
   ```bash
   npm run login
-  # ou
+  # or
   node index.js --login
   ```
-* **En Python :**
+* **Using Python:**
   ```bash
   python login_helper.py
   ```
 
-Connectez-vous à votre compte Google et vérifiez que vous accédez à Gemini, puis fermez le navigateur. Votre session est sauvegardée dans `./storage/playwright_profile` ou `./user_data`.
+Log in to your Google account and verify that the Gemini chat interface loads, then close the browser. Your session is safely stored in `./storage/playwright_profile` or `./user_data`.
 
 ---
 
-## 💻 Utilisation CLI
+## 💻 CLI Usage
 
-### Cas 1 : Prompt seul (Génération d'image ou texte)
+### Case 1: Prompt Only (Image or Text Generation)
 ```bash
-node index.js --prompt "Un astronaute explorant une jungle extraterrestre fluorescente" --out "./mars.png"
+node index.js --prompt "An astronaut exploring a fluorescent alien jungle" --out "./mars.png"
 ```
-*(ou en Python : `python cli.py --prompt "..." --out "./mars.png"`)*
+*(or with Python: `python cli.py --prompt "..." --out "./mars.png"`)*
 
-### Cas 2 : Image seule (Upload direct sans prompt)
+### Case 2: Image Only (Direct Upload Without Prompt)
 ```bash
 node index.js --image "./photo.png" --out "./result.png"
 ```
-*(ou en Python : `python cli.py --image "./photo.png" --out "./result.png"`)*
+*(or with Python: `python cli.py --image "./photo.png" --out "./result.png"`)*
 
-### Cas 3 : Image + Prompt (Édition / Modification d'image)
+### Case 3: Image + Prompt (Image Edition / Modification)
 ```bash
-node index.js --image "./portrait.png" --prompt "transforme cette photo en style anime cyberpunk" --out "./cyberpunk.png"
+node index.js --image "./portrait.png" --prompt "transform this photo into anime cyberpunk style" --out "./cyberpunk.png"
 ```
-*(ou en Python : `python cli.py --image "./portrait.png" --prompt "..." --out "./cyberpunk.png"`)*
+*(or with Python: `python cli.py --image "./portrait.png" --prompt "..." --out "./cyberpunk.png"`)*
 
-### Options du CLI
-| Option | Raccourci | Description | Défaut |
+### CLI Options
+| Option | Shorthand | Description | Default |
 |---|---|---|---|
-| `--prompt` | `-p` | Texte du prompt ou instruction | `null` |
-| `--image` | `-i` | Chemin de l'image locale à envoyer | `null` |
-| `--out` | `-o` | Chemin du fichier de sortie généré | `./output.png` |
-| `--server` | `-s` | Démarre le serveur Express léger | `false` |
-| `--port` | | Port du serveur | `3000` |
-| `--no-headless` | `--headful` | Affiche la fenêtre du navigateur (debug) | `headless` |
-| `--login` | | Ouvre le navigateur pour se connecter à Google | |
+| `--prompt` | `-p` | Text prompt or instruction | `null` |
+| `--image` | `-i` | Local input image path | `null` |
+| `--out` | `-o` | Output file path | `./output.png` |
+| `--server` | `-s` | Start the lightweight Express server | `false` |
+| `--port` | | Server port | `3000` |
+| `--no-headless` | `--headful` | Run browser in visible mode (for debugging) | `headless` |
+| `--login` | | Open browser to authenticate with Google | |
 
 ---
 
-## 🌐 Utilisation Serveur Web (Endpoint minimaliste `POST /`)
+## 🌐 Web Server Usage (Minimalist `POST /` Endpoint)
 
-### Démarrer le serveur Express (Node.js) :
+### Start the Express Server (Node.js):
 ```bash
 node index.js --server --port 3000
 ```
 
-### Démarrer le serveur FastAPI (Python d'origine) :
+### Start the FastAPI Server (Python):
 ```bash
 python main.py
-# ou uvicorn app.main:app --host 0.0.0.0 --port 8000
+# or: uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Requête avec cURL (réception de l'image binaire directe) :
+### Making Requests with cURL (Direct Binary Image Response):
 ```bash
-# Cas 3 : Image + Prompt
+# Case 3: Image + Prompt
 curl -X POST http://localhost:3000/ \
-  -F "prompt=transforme cette photo en style aquarelle" \
+  -F "prompt=transform this photo into watercolor painting style" \
   -F "image=@./portrait.png" \
-  --output ./aquarelle.png
+  --output ./watercolor.png
 
-# Cas 1 : Prompt seul
+# Case 1: Prompt only
 curl -X POST http://localhost:3000/ \
-  -F "prompt=un paysage futuriste sous la pluie" \
-  --output ./futuriste.png
+  -F "prompt=futuristic cityscape under neon rain" \
+  --output ./city.png
 
-# Cas 2 : Image seule
+# Case 2: Image only
 curl -X POST http://localhost:3000/ \
   -F "image=@./source.png" \
-  --output ./resultat.png
+  --output ./result.png
 ```
 
 ---
 
-## 📁 Structure du projet
+## 📁 Project Structure
 
 ```
 .
-├── index.js                 # ✨ Point d'entrée universel Node.js (CLI + Serveur Express optionnel)
-├── login.js                 # ✨ Raccourci de connexion Node.js
-├── cli.py                   # ✨ Point d'entrée CLI Python
-├── package.json             # ✨ Dépendances Node.js (Playwright, Express, Multer)
+├── index.js                 # Universal Node.js entry point (CLI + Optional Express server)
+├── login.js                 # Node.js login shortcut
+├── cli.py                   # Python CLI entry point
+├── package.json             # Node.js dependencies (Playwright, Express, Multer)
 ├── app/
-│   ├── main.py              # FastAPI (inclus désormais POST / binaire)
-│   ├── gemini_automation.py # Cœur d'automation Playwright (gestion des 3 cas & extraction d'images)
-│   ├── browser_manager.py   # Gestionnaire de cycle de vie du navigateur persistant
-│   ├── models.py            # Modèles Pydantic pour FastAPI
-│   └── config.py            # Configuration et variables d'environnement
-├── login_helper.py          # Assistant de connexion original Python
-├── test_api.py              # Script de test de l'API
-├── requirements.txt         # Dépendances Python
-├── .env.example             # Modèle de variables d'environnement
-├── LICENSE                  # Licence MIT d'origine
-└── README.md                # Documentation complète
+│   ├── main.py              # FastAPI app (includes POST / binary route)
+│   ├── gemini_automation.py # Core Playwright automation (3 cases & image extraction)
+│   ├── browser_manager.py   # Persistent browser lifecycle manager
+│   ├── models.py            # Pydantic models for FastAPI
+│   └── config.py            # Environment configuration
+├── login_helper.py          # Python one-time login script
+├── test_api.py              # API test script
+├── requirements.txt         # Python dependencies
+├── .env.example             # Environment variable template
+├── LICENSE                  # Original MIT License
+└── README.md                # Comprehensive documentation
 ```
 
 ---
 
-## ⚖️ Licence & Attribution
+## ⚖️ License & Attribution
 
-Ce projet conserve intégralement la licence **MIT** du projet source :
-* Projet original : [`czarflix/GeminiCustomAPI`](https://github.com/czarflix/GeminiCustomAPI)
-* Auteurs : Czarflix & contributeurs de Gemini Custom API
+This project retains the original **MIT License**:
+* Original project: [`czarflix/GeminiCustomAPI`](https://github.com/czarflix/GeminiCustomAPI)
+* Authors: Czarflix & Gemini Custom API contributors
 * Copyright (c) 2025 Gemini Custom API Contributors
 
-*Avertissement : Cet outil automatise l'interface web de Google Gemini pour un usage personnel et expérimental. Il n'est pas affilié à Google.*
+*Disclaimer: This tool automates the Google Gemini web interface for personal and experimental use. It is not affiliated with or endorsed by Google.*

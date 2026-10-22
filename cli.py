@@ -3,9 +3,9 @@
 CLI entrypoint for Gemini Web UI Automation (Python / Playwright).
 
 Usage:
-  python cli.py --prompt "un chat mignon style 3d" --out "./output.png"
+  python cli.py --prompt "a cute cat in 3d render style" --out "./output.png"
   python cli.py --image "./input.png" --out "./output.png"
-  python cli.py --image "./input.png" --prompt "transforme en style anime" --out "./output.png"
+  python cli.py --image "./input.png" --prompt "transform into anime style" --out "./output.png"
 """
 
 import argparse

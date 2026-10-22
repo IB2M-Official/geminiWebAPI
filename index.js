@@ -10,14 +10,14 @@
  * 
  * Usage:
  *   CLI:
- *     node index.js --prompt "un chat mignon style 3d" --out "./output.png"
+ *     node index.js --prompt "a cute cat in 3d render style" --out "./output.png"
  *     node index.js --image "./input.png" --out "./output.png"
- *     node index.js --prompt "transforme en style manga" --image "./input.png" --out "./output.png"
+ *     node index.js --prompt "transform into anime manga style" --image "./input.png" --out "./output.png"
  *     node index.js --login
  * 
  *   Server (Express option):
  *     node index.js --server --port 3000
- *     curl -X POST http://localhost:3000/ -F "prompt=un chat" -F "image=@./input.png" --output ./result.png
+ *     curl -X POST http://localhost:3000/ -F "prompt=a cute cat" -F "image=@./input.png" --output ./result.png
  */
 
 const fs = require('fs');
@@ -84,8 +84,8 @@ function printHelp() {
 Gemini Web Automation (Playwright Lightweight Wrapper)
 ------------------------------------------------------
 Options:
-  --prompt, -p <text>     Text prompt (Prompt seul ou instruction avec image)
-  --image, -i  <path>     Input image path (Image seule ou image source à modifier)
+  --prompt, -p <text>     Text prompt (Prompt alone or multimodal instruction)
+  --image, -i  <path>     Input image path (Image alone or source image to edit)
   --out, -o    <path>     Output file path (default: ./output.png)
   --login                 Open browser to authenticate your Google session
   --server, -s            Launch lightweight Express HTTP server
@@ -95,13 +95,13 @@ Options:
 
 Examples:
   1. Prompt text alone:
-     node index.js --prompt "Dessine un astronaute sur Mars" --out "./mars.png"
+     node index.js --prompt "Draw an astronaut on Mars" --out "./mars.png"
 
   2. Image alone:
      node index.js --image "./photo.png" --out "./output.png"
 
   3. Image + Prompt (Edit / Transform):
-     node index.js --image "./portrait.png" --prompt "transforme cette photo en style anime manga" --out "./manga.png"
+     node index.js --image "./portrait.png" --prompt "transform this photo into anime style" --out "./anime.png"
 
   4. Login helper:
      node index.js --login
